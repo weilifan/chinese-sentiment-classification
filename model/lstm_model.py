@@ -14,7 +14,7 @@ import pickle
 
 train_batch_size = 512
 test_batch_size = 128
-voc_model = pickle.load(open("./models/vocab.pkl", "rb"))
+voc_model = pickle.load(open("../build_vocab/models/vocab.pkl", "rb"))
 sequence_max_len = 100
 Vocab()
 
@@ -46,7 +46,9 @@ class ImdbModel(nn.Module):
         super(ImdbModel, self).__init__()
         self.embedding = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=200, padding_idx=padding_idx).to()
         self.lstm = nn.LSTM(input_size=200, hidden_size=64, num_layers=2, batch_first=True, bidirectional=True,
-                            dropout=0.5)
+                            dropout=0.5) # batch_first： 如果是True，则input为(batch, seq, input_size)。默认值为：False（seq_len, batch, input_size）
+        # self.rnn = nn.RNN(input_size=200, hidden_size=64, num_layers=2, nonlinearity='tanh', bias=True, batch_first=True, bidirectional=True,
+        #                   dropout=0.5)
         self.fc1 = nn.Linear(64 * 2, 64)
         self.fc2 = nn.Linear(64, 2)
 

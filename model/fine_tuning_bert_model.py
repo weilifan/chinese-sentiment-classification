@@ -1,12 +1,13 @@
 import torch
 from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
 from tqdm import tqdm
-from transformers import BertTokenizer,BertModel
+from transformers import BertTokenizer, BertModel
 import torch.nn as nn
 import numpy as np
 import pandas as pd
 from torch import optim
 from matplotlib import pyplot as plt
+
 
 class BertDataset(Dataset):
 
@@ -15,8 +16,7 @@ class BertDataset(Dataset):
 
         self.tokenizer = BertTokenizer.from_pretrained("bert-base-chinese")
 
-        self.tokens_list, self.atten_mask_list, self.label_list =  self.process_data(data_path, max_len)
-
+        self.tokens_list, self.atten_mask_list, self.label_list = self.process_data(data_path, max_len)
 
     def process_data(self, data_path, max_len):
 
@@ -25,22 +25,22 @@ class BertDataset(Dataset):
         tokens_list = []
 
         for line in data["Comment"].tolist():
+            if isinstance(line, str):
+                text_tokens = self.tokenizer.tokenize(line)
 
-            text_tokens = self.tokenizer.tokenize(line)
+                tokens = ["[CLS]"] + text_tokens + ["[SEP]"]
 
-            tokens = ["[CLS]"]+ text_tokens + ["[SEP]"]
+                if len(tokens) < max_len:
+                    diff = max_len - len(tokens)
+                    attn_mask = [1] * len(tokens) + [0] * diff
+                    tokens += ["[PAD]"] * diff
+                else:
+                    tokens = tokens[:max_len - 1] + ["[SEP]"]
+                    attn_mask = [1] * max_len
 
-            if len(tokens) < max_len:
-                diff = max_len - len(tokens)
-                attn_mask = [1] * len(tokens) + [0] * diff
-                tokens += ["[PAD]"] * diff
-            else:
-                tokens = tokens[:max_len - 1] + ["[SEP]"]
-                attn_mask = [1] * max_len
-
-            tokens_ids = self.tokenizer.convert_tokens_to_ids(tokens)
-            atten_mask_list.append(attn_mask)
-            tokens_list.append(tokens_ids)
+                tokens_ids = self.tokenizer.convert_tokens_to_ids(tokens)
+                atten_mask_list.append(attn_mask)
+                tokens_list.append(tokens_ids)
 
         return tokens_list, atten_mask_list, data['Star'].tolist()
 
@@ -49,15 +49,14 @@ class BertDataset(Dataset):
 
     def __getitem__(self, index):
 
-        return torch.tensor(self.tokens_list[index]),\
-               torch.tensor(self.atten_mask_list[index]),\
-               0 if self.label_list[index] < 3 else 1
+        return torch.tensor(self.tokens_list[index]), \
+               torch.tensor(self.atten_mask_list[index]), \
+               0 if self.label_list[index] < 4 else 1
 
 
 class BertLoader():
 
     def __init__(self, batch_size):
-
         train_dataset = BertDataset("../data/DMSC.csv")
 
         validation_split = .2
@@ -72,8 +71,10 @@ class BertLoader():
 
         # val_dataset = BertDataset(root_path+"_val.csv", max_len)
         # test_dataset = BertDataset(root_path+"_test.csv", max_len)
-        self._train_loader = torch.utils.data.DataLoader(train_dataset, shuffle=True, batch_size=batch_size, sampler=train_sampler)
-        self._val_loader = torch.utils.data.DataLoader(train_dataset, shuffle=False, batch_size=batch_size, sampler=valid_sampler)
+        self._train_loader = torch.utils.data.DataLoader(train_dataset, shuffle=False, batch_size=batch_size,
+                                                         sampler=train_sampler)
+        self._val_loader = torch.utils.data.DataLoader(train_dataset, shuffle=False, batch_size=batch_size,
+                                                       sampler=valid_sampler)
         # self._test_loader = torch.utils.data.DataLoader(test_dataset, shuffle=False, batch_size=batch_size)
 
     def get_train_loader(self):
@@ -84,29 +85,27 @@ class BertLoader():
     # def get_test_loader(self):
     #     return self._test_loader
 
-class WaiMaiBertModel(nn.Module):
+
+class BertModel(nn.Module):
     def __init__(self):
-        super(WaiMaiBertModel, self).__init__()
+        super(BertModel, self).__init__()
 
         self.bert = BertModel.from_pretrained("bert-base-chinese")
         self.dropout = nn.Dropout(0.3)
         self.classifier = nn.Linear(768, 2)
 
     def forward(self, input_ids, atten_mask):
-
-        bert_output= self.bert(input_ids, attention_mask=atten_mask) # cont_reps是last_hidden_state
-        features = bert_output[1]
+        bert_output = self.bert(input_ids, attention_mask=atten_mask)  # cont_reps是last_hidden_state
+        features = bert_output[1]  # 这是序列的第一个token(classification token)的最后一层的隐藏状态，它是由线性层和Tanh激活函数进一步处理的。
         cls_rep = self.dropout(features)
         outs = self.classifier(cls_rep)
         return outs
 
 
-def evaluate(model, data_loader, criteon):
-
+def validate(model, data_loader, criteon):
     model.eval()
     dev_loss, label_list, pred_list = [], [], []
     for tokens, masks, labels in data_loader:
-
         tokens = tokens.to(DEVICE)
         masks = masks.to(DEVICE)
         labels = labels.to(DEVICE)
@@ -126,19 +125,17 @@ def evaluate(model, data_loader, criteon):
     pred_list = np.argmax(np.concatenate(pred_list, axis=0), axis=1)
     label_list = np.concatenate(label_list, axis=0)
 
-    correct = (pred_list==label_list).sum()
-    return np.array(dev_loss).mean(), float(correct)/len(label_list)
+    correct = (pred_list == label_list).sum()
+    return np.array(dev_loss).mean(), float(correct) / len(label_list)
 
 
-def train(batch_size,max_len,optimizer,lr,weight_decay,epochs,clip):
-
-    weibo_loader = BertLoader(batch_size)
-
-    train_loader = weibo_loader.get_train_loader()
-    val_loader = weibo_loader.get_val_loader()
+def train(batch_size, optimizer, lr, weight_decay, epochs, clip, max_len):
+    dataloader = BertLoader(batch_size)
+    train_loader = dataloader.get_train_loader()
+    val_loader = dataloader.get_val_loader()
 
     # construct data loader
-    model = WaiMaiBertModel()
+    model = BertModel()
     model = model.to(DEVICE)
     if optimizer == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -152,16 +149,14 @@ def train(batch_size,max_len,optimizer,lr,weight_decay,epochs,clip):
     train_acc_list = []
     val_acc_list = []
 
-
     # log process
     best_acc = 0
     for epoch in range(epochs):
         bar = tqdm(train_loader, total=len(train_loader))
         model.train()
 
-        train_loss,label_list,pred_list = [],[],[]
+        train_loss, label_list, pred_list = [], [], []
         for idx, (tokens, masks, labels) in enumerate(bar):
-
             tokens = tokens.to(DEVICE)
             masks = masks.to(DEVICE)
             labels = labels.to(DEVICE)
@@ -187,18 +182,16 @@ def train(batch_size,max_len,optimizer,lr,weight_decay,epochs,clip):
             bar.set_description("epcoh:{}  idx:{}   loss:{:.6f}".format(epoch, idx, loss.item()))
 
         train_loss = np.array(train_loss).mean()
-        val_loss, val_acc = evaluate(model, val_loader, criteon)
+        val_loss, val_acc = validate(model, val_loader, criteon)
 
         pred_list = np.argmax(np.concatenate(pred_list, axis=0), axis=1)
         label_list = np.concatenate(label_list, axis=0)
 
         correct = (pred_list == label_list).sum()
         train_acc = float(correct) / len(label_list)
-        # if val_acc > best_acc:
-        #     best_acc = val_acc
-        #     torch.save(model.state_dict(), "best.pt".format(epoch, best_acc))
+
         torch.save(model.state_dict(), SAVE_PATH + "epoch{}_{:.4f}.pt".format(epoch, val_acc))
-        print('Training loss:{}, Val loss:{}'.format(train_loss,val_loss ))
+        print('Training loss:{}, Val loss:{}'.format(train_loss, val_loss))
         print("train acc:{:.4f}, val acc:{:4f}".format(train_acc, val_acc))
 
         train_loss_list.append(train_loss)
@@ -223,14 +216,13 @@ def train(batch_size,max_len,optimizer,lr,weight_decay,epochs,clip):
     plt.show()
 
 
-def predict(sentence,max_len, weights_path):
-
+def predict(sentence, max_len, weights_path):
     # weibo_loader = BertLoader(batch_size, ROOT_PATH, max_len)
     # test_loader = weibo_loader.get_test_loader()
 
     # construct data loader
-    model = WaiMaiBertModel()
-    model.load_state_dict(torch.load(weights_path))
+    model = BertModel()
+    model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
     model = model.to(DEVICE)
     # criterion = nn.CrossEntropyLoss()
 
@@ -247,12 +239,24 @@ def predict(sentence,max_len, weights_path):
         tokens = tokens[:max_len - 1] + ["[SEP]"]
         attn_mask = [1] * max_len
 
-    tokens = tokens.to(DEVICE)
-    masks = attn_mask.to(DEVICE)
+    tokens = tokenizer.convert_tokens_to_ids(tokens)
 
-    with torch.no_grad():
-        preds = model(tokens, masks)
-    print("output",preds)
+    tokens = torch.tensor([tokens]).to(DEVICE)
+    masks = torch.tensor([attn_mask]).to(DEVICE)
+
+    # print(tokens)
+    # print(masks)
+
+    # model.eval()
+    # with torch.no_grad():
+    preds = model(input_ids=tokens, atten_mask=masks)
+
+    entroy = nn.CrossEntropyLoss()
+    target1 = torch.tensor([0])
+    target2 = torch.tensor([1])
+
+    print(entroy(preds, target1), entroy(preds, target2))
+    # print("output",preds)
 
 
 if __name__ == "__main__":
@@ -260,5 +264,6 @@ if __name__ == "__main__":
 
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # th number 3 has the highest priority
-    train(lr=5e-4, weight_decay=1e-3,clip=0.8,epochs=10,optimizer="sgd",batch_size=10,max_len=200)
-    predict('好看的，赞，推荐给大家', max_len=200, weights_path="weights/epoch7_0.9189.pt")
+    train(lr=5e-4, weight_decay=1e-3, clip=0.8, epochs=1, optimizer="sgd", batch_size=10, max_len=200)
+    predict('好看的，赞，推荐给大家', max_len=200, weights_path="weights/epoch0_0.8407.pt")
+    predict('什么破烂反派，毫无戏剧冲突能消耗两个多小时生命，还强加爱情戏。脑残片好圈钱倒是真的', max_len=200, weights_path="weights/epoch0_0.8407.pt")

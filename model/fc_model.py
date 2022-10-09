@@ -4,18 +4,19 @@ import pickle
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim import Adam
-from torch.utils.data import DataLoader
+from torch import optim
+from torch.utils.data import DataLoader, SubsetRandomSampler
 from tqdm import tqdm
+import numpy as np
+from matplotlib import pyplot as plt
 
 from model import dataset_train
 from model.vocab import Vocab
 
 import jieba
 
-train_batch_size = 512  # 训练的batch size
-test_batch_size = 500  # 测试的batch size
-voc_model = pickle.load(open("../build_vocab/models/vocab.pkl", "rb"))
+batch_size = 512  # batch size
+voc_model = pickle.load(open("../models/vocab.pkl", "rb"))
 sequence_max_len = 100# 一个句子的最大长度
 Vocab()
 
@@ -37,9 +38,24 @@ def get_dataset():
     return dataset_train.ImdbDataset(train)
 
 
-def get_dataloader(imdb_dataset, train=True):
-    batch_size = train_batch_size if train else test_batch_size
-    return DataLoader(imdb_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+def get_dataloader(imdb_dataset, train):
+    validation_split = .2
+    dataset_size = len(imdb_dataset)
+    indices = list(range(dataset_size))
+    split = int(np.floor(validation_split * dataset_size))
+    train_indices, val_indices = indices[split:], indices[:split]
+
+    # Creating PT data samplers and loaders:
+    train_sampler = SubsetRandomSampler(train_indices)
+    valid_sampler = SubsetRandomSampler(val_indices)
+
+    _train_loader = DataLoader(imdb_dataset, shuffle=False, batch_size=batch_size,
+                                                     sampler=train_sampler)
+    _val_loader = DataLoader(imdb_dataset, shuffle=False, batch_size=batch_size,
+                                                   sampler=valid_sampler)
+    loader = _train_loader if train else _val_loader
+    return loader
+
 
 class ImdbModel(nn.Module):
     def __init__(self, num_embeddings, padding_idx):
@@ -70,82 +86,148 @@ def device():
         return torch.device('cpu')
 
 
-def train(imdb_model, imdb_dataset, epoch):
-    """
+def validate(model, data_loader, criteon):
+    model.eval()
+    dev_loss, label_list, pred_list = [], [], []
 
-    :param imdb_model:
-    :param epoch:
-    :return:
-    """
-    train_dataloader = get_dataloader(imdb_dataset,train=True)
-    # bar = tqdm(train_dataloader, total=len(train_dataloader))
+    for tokens, labels in data_loader:
 
-    optimizer = Adam(imdb_model.parameters())
+        tokens = torch.stack(tokens, dim=1).to(device())
+        labels = labels.to(device())
+        with torch.no_grad():
+            preds = model(tokens)
+        loss = criteon(preds, labels)
+        dev_loss.append(loss.item())
+        pred_list.append(preds.detach().cpu().numpy())
+        label_list.append(labels.detach().cpu().numpy())
+
+    pred_list = np.argmax(np.concatenate(pred_list, axis=0), axis=1)
+    label_list = np.concatenate(label_list, axis=0)
+
+    correct = (pred_list == label_list).sum()
+    return np.array(dev_loss).mean(), float(correct) / len(label_list)
+
+
+def train(optimizer, lr, weight_decay, epoch, clip):
+    dataset = get_dataset()
+    train_loader = get_dataloader(dataset, train=True)
+    val_loader = get_dataloader(dataset, train=False)
+
+    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    # model.load_state_dict(torch.load("weights/fc_model_epoch9_0.8352.pt", map_location=DEVICE))
+    if optimizer == "adam":
+        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9)
+
+    criteon = nn.CrossEntropyLoss()
+
+    train_loss_list = []
+    val_loss_list = []
+    train_acc_list = []
+    val_acc_list = []
+
     for i in range(epoch):
-        bar = tqdm(train_dataloader, total=len(train_dataloader))
-        for idx, (data, target) in enumerate(bar):
+        bar = tqdm(train_loader, total=len(train_loader))
+        model.train()
+        train_loss, label_list, pred_list = [], [], []
+        for idx, (tokens, labels) in enumerate(bar):
+            tokens = torch.stack(tokens, dim=1).to(device())
+            target = labels.to(device())
+
             optimizer.zero_grad()
-            data = data.to(device())
-            target = target.to(device())
-            output = imdb_model(data)
-            loss = F.nll_loss(output, target)
+
+            preds = model(tokens)
+            loss = criteon(preds, target)
+
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
             optimizer.step()
+
+            train_loss.append(loss.item())
+            label_list.append(labels.detach().cpu().numpy())
+            pred_list.append(preds.detach().cpu().numpy())
+
             bar.set_description("epcoh:{}  idx:{}   loss:{:.6f}".format(i, idx, loss.item()))
-    # 保存模型
-    path_model = "./models/fc_model.pkl"
-    torch.save(imdb_model, path_model)
-    # 保存模型参数
-    path_state_dict = "./models/fc_model_state_dict.pkl"
-    net_state_dict = imdb_model.state_dict()
-    torch.save(net_state_dict, path_state_dict)
+
+        train_loss = np.array(train_loss).mean()
+        val_loss, val_acc = validate(model, val_loader, criteon)
+
+        pred_list = np.argmax(np.concatenate(pred_list, axis=0), axis=1)
+        label_list = np.concatenate(label_list, axis=0)
+
+        correct = (pred_list == label_list).sum()
+        train_acc = float(correct) / len(label_list)
+
+        torch.save(model.state_dict(), SAVE_PATH + "fc_model_epoch{}_{:.4f}.pt".format(i, val_acc))
+        print('Training loss:{}, Val loss:{}'.format(train_loss, val_loss))
+        print("train acc:{:.4f}, val acc:{:4f}".format(train_acc, val_acc))
+
+        train_loss_list.append(train_loss)
+        train_acc_list.append(train_acc)
+        val_loss_list.append(val_loss)
+        val_acc_list.append(val_acc)
+
+    plt.figure()
+    plt.plot(train_loss_list)
+    plt.plot(val_loss_list)
+    plt.xlabel("epoch")
+    plt.ylabel('loss')
+    plt.legend(['train', 'val'])
+    plt.show()
+
+    plt.figure()
+    plt.plot(train_acc_list)
+    plt.plot(val_acc_list)
+    plt.xlabel("epoch")
+    plt.ylabel('accuracy')
+    plt.legend(['train', 'val'])
+    plt.show()
 
 
-def test(imdb_model, imdb_dataset):
-    """
-    验证模型
-    :param imdb_model:
-    :return:
-    """
-    test_loss = 0
-    correct = 0
-    imdb_model.eval()
-    test_dataloader = get_dataloader(imdb_dataset,train=False)
-    with torch.no_grad():
-        for data, target in tqdm(test_dataloader):
-            print(data.shape)
-            print(target.shape)
-            print(target)
+def predict(sentence,max_len, weights_path):
 
-            data = data.to(device())
-            target = target.to(device())
-            output = imdb_model(data)
-            test_loss += F.nll_loss(output, target, reduction='sum').item()
-            pred = output.data.max(1, keepdim=True)[1]  # 获取最大值的位置,[batch_size,1]
-            correct += pred.eq(target.data.view_as(pred)).sum()
-    test_loss /= len(test_dataloader.dataset)
-    print('\nTest set: Avg. loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
-        test_loss, correct, len(test_dataloader.dataset),
-        100. * correct / len(test_dataloader.dataset)))
+    # weibo_loader = BertLoader(batch_size, ROOT_PATH, max_len)
+    # test_loader = weibo_loader.get_test_loader()
+
+    # construct data loader
+    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
+    model = model.to(DEVICE)
+    # criterion = nn.CrossEntropyLoss()
+
+    text_tokens = [word for word in jieba.cut(sentence)]  # 直接使用jieba分词
+    tokens = voc_model.transform(text_tokens, max_len=max_len)
+    tokens = torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(DEVICE)
+
+    preds = model(tokens)
+
+    # entroy = nn.CrossEntropyLoss()
+    # target1 = torch.tensor([0])
+    # target2 = torch.tensor([1])
+    #
+    # print(entroy(preds, target1),entroy(preds, target2))
+    print("output",preds)
 
 
 if __name__ == '__main__':
-    imdb_dataset = get_dataset()
-    imdb_model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
-    train(imdb_model, imdb_dataset, 4)
-    test(imdb_model, imdb_dataset)
+    SAVE_PATH = 'weights/'
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    train(optimizer="sgd", lr=5e-4, weight_decay=1e-3, epoch=10, clip=0.8)
+    # predict('好看的，赞，推荐给大家', max_len=100, weights_path="weights/fc_model_epoch2_0.6360.pt")
+    # predict('无理由特效,全程很尴尬，这一星是给幕后辛苦的特效人员的', max_len=100, weights_path="weights/fc_model_epoch2_0.6360.pt")
 
 
-    data = '挺好看的'
-    voc_model = pickle.load(open("./models/vocab.pkl", "rb"))
-    review = [word for word in jieba.cut(data)]  # 直接使用jieba分词
-
-    voc_result = voc_model.transform(review, max_len=100)
-    print("哈哈",voc_result)
-    print("呵呵", len(voc_result))
-
-
-
-    print("呵呵", torch.tensor(voc_result, dtype=torch.long).unsqueeze(0).shape)
-    print(torch.tensor(voc_result, dtype=torch.long).unsqueeze(0).shape)
-    print(imdb_model(torch.tensor(voc_result, dtype=torch.long).unsqueeze(0)))
+    # data = '挺好看的'
+    # voc_model = pickle.load(open("./models/vocab.pkl", "rb"))
+    # review = [word for word in jieba.cut(data)]  # 直接使用jieba分词
+    #
+    # voc_result = voc_model.transform(review, max_len=100)
+    # print("哈哈",voc_result)
+    # print("呵呵", len(voc_result))
+    #
+    #
+    #
+    # print("呵呵", torch.tensor(voc_result, dtype=torch.long).unsqueeze(0).shape)
+    # print(torch.tensor(voc_result, dtype=torch.long).unsqueeze(0).shape)
+    # # print(imdb_model(torch.tensor(voc_result, dtype=torch.long).unsqueeze(0)))

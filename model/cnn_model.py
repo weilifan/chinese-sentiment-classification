@@ -1,27 +1,67 @@
+# -*-coding:utf-8-*-
+import pickle
+
 import torch
 import torch.nn as nn
-import pandas as pd
-from torch.utils.data import DataLoader, Dataset
-from torch.optim import Adam
-import jieba
-# from utils import WVEmbedding
-from torch.optim.lr_scheduler import MultiStepLR
-from matplotlib import pyplot as plt
-import numpy as np
+import torch.nn.functional as F
 from torch import optim
+from torch.utils.data import DataLoader, SubsetRandomSampler
+from tqdm import tqdm
+import numpy as np
+from matplotlib import pyplot as plt
+
 from model import dataset_train
-# from utils import WaiMaiDataSet
+from vocab import Vocab
+
+import jieba
+
+batch_size = 512  # batch size
+voc_model = pickle.load(open("../models/vocab.pkl", "rb"))
+sequence_max_len = 100  # 一个句子的最大长度
+Vocab()
+
+
+def collate_fn(batch):
+    """
+    对batch数据进行处理
+    :param batch: [一个getitem的结果，getitem的结果,getitem的结果]
+    :return: 元组
+    """
+    reviews, labels = zip(*batch)
+    # reviews = torch.LongTensor([voc_model.transform(i, max_len=sequence_max_len) for i in reviews])
+    reviews = torch.LongTensor(reviews)
+    labels = torch.LongTensor(labels)
+    return reviews, labels
+
 
 def get_dataset():
     return dataset_train.ImdbDataset(train)
 
-class TextCNN(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, embedding_weights):
-        super(TextCNN, self).__init__()
 
-        self.embedding_layer = nn.Embedding(vocab_size, embedding_dim)
-        self.embedding_layer.weight = nn.Parameter(
-            torch.FloatTensor(embedding_weights), requires_grad=False)
+def get_dataloader(imdb_dataset, train):
+    validation_split = .2
+    dataset_size = len(imdb_dataset)
+    indices = list(range(dataset_size))
+    split = int(np.floor(validation_split * dataset_size))
+    train_indices, val_indices = indices[split:], indices[:split]
+
+    # Creating PT data samplers and loaders:
+    train_sampler = SubsetRandomSampler(train_indices)
+    valid_sampler = SubsetRandomSampler(val_indices)
+
+    _train_loader = DataLoader(imdb_dataset, shuffle=False, batch_size=batch_size,
+                               sampler=train_sampler)
+    _val_loader = DataLoader(imdb_dataset, shuffle=False, batch_size=batch_size,
+                             sampler=valid_sampler)
+    loader = _train_loader if train else _val_loader
+    return loader
+
+class ImdbModel(nn.Module):
+    def __init__(self, num_embeddings, padding_idx):
+        super(ImdbModel, self).__init__()
+        embedding_dim = 200
+
+        self.embedding = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=200, padding_idx=padding_idx)
 
         self.conv1 = nn.Sequential(
             nn.Conv2d(1, 100, kernel_size=(3, embedding_dim)),
@@ -43,106 +83,108 @@ class TextCNN(nn.Module):
             nn.Linear(300, 2)
         )
 
-    def forward(self, x):
+    def forward(self, input):
+        input_embeded = self.embedding(input)  # torch.Size([512, 100, 200])
+        # input_embeded_viewed = input_embeded.view(input_embeded.size(0), -1)
+        input_embeded_viewed = input_embeded.unsqueeze(dim=1)  # torch.Size([512, 1, 100, 200])
+        feature1 = self.conv1(input_embeded_viewed).squeeze(
+            -1)  # squeeze前torch.Size([512, 100, 98, 1])，后torch.Size([512, 100, 98])
+        feature2 = self.conv2(input_embeded_viewed).squeeze(-1)  # torch.Size([512, 100, 97])
+        feature3 = self.conv3(input_embeded_viewed).squeeze(-1)  # torch.Size([512, 100, 96])
 
-        x = self.embedding_layer(x)
-        x = x.unsqueeze(dim=1)
+        feature1 = self.max_pool(feature1).squeeze(-1)  # torch.Size([512, 100])
+        feature2 = self.max_pool(feature2).squeeze(-1)  # torch.Size([512, 100])
+        feature3 = self.max_pool(feature3).squeeze(-1)  # torch.Size([512, 100])
 
-        feature1 = self.conv1(x).squeeze(-1)
-        feature2 = self.conv2(x).squeeze(-1)
-        feature3 = self.conv3(x).squeeze(-1)
+        features = torch.cat([feature1, feature2, feature3], dim=-1)  # torch.Size([512, 300])
+        out = self.classifier(features)
 
-        feature1 = self.max_pool(feature1).squeeze(-1)
-        feature2 = self.max_pool(feature2).squeeze(-1)
-        feature3 = self.max_pool(feature3).squeeze(-1)
-
-        features = torch.cat([feature1, feature2, feature3], dim=-1)
-        x = self.classifier(features)
-
-        return x
-
-
+        return F.log_softmax(out, dim=-1)
 
 
-def evaluate(model, data_loader, criteon):
+def device():
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    else:
+        return torch.device('cpu')
 
+
+def validate(model, data_loader, criteon):
     model.eval()
-    dev_loss = []
-    correct = 0
-    for tokens, token_len, labels in data_loader:
-        tokens, token_len, labels = tokens.to(DEVICE), token_len.to(DEVICE), labels.to(DEVICE)
+    dev_loss, label_list, pred_list = [], [], []
 
+    for tokens, labels in data_loader:
+
+        tokens = torch.stack(tokens, dim=1).to(device())
+        labels = labels.to(device())
         with torch.no_grad():
             preds = model(tokens)
-            loss = criteon(preds, labels)
-            dev_loss.append(loss.item())
+        loss = criteon(preds, labels)
+        dev_loss.append(loss.item())
+        pred_list.append(preds.detach().cpu().numpy())
+        label_list.append(labels.detach().cpu().numpy())
 
-            correct += (preds.argmax(1)==labels).sum()
+    pred_list = np.argmax(np.concatenate(pred_list, axis=0), axis=1)
+    label_list = np.concatenate(label_list, axis=0)
 
-    return np.array(dev_loss).mean(), float(correct) / len(data_loader.dataset)
-
-
-def train(args):
-
-    # construct data loader
-    train_data_set = WaiMaiDataSet(TRAIN_PATH, wv_embedding.word_to_id, args.max_len, args.use_unk)
-    train_data_loader = DataLoader(train_data_set, batch_size=args.batch_size, shuffle=True)
-
-    dev_data_set = WaiMaiDataSet(DEV_PATH, wv_embedding.word_to_id, args.max_len, args.use_unk)
-    dev_data_loader = DataLoader(dev_data_set, batch_size=args.batch_size, shuffle=False)
+    correct = (pred_list == label_list).sum()
+    return np.array(dev_loss).mean(), float(correct) / len(label_list)
 
 
-    model = TextCNN(args.vocab_size, args.embedding_dim, wv_embedding.embedding)
-    model = model.to(DEVICE)
+def train(optimizer, lr, weight_decay, epoch, clip):
+    dataset = get_dataset()
+    train_loader = get_dataloader(dataset, train=True)
+    val_loader = get_dataloader(dataset, train=False)
 
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9,
-                          weight_decay=args.weight_decay)
-    # optimizer = optim.AdamW(model.parameters(), weight_decay=args.weight_decay)
+    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    # model.load_state_dict(torch.load("weights/cnn_model_epoch9_0.8352.pt", map_location=DEVICE))
+    if optimizer == "adam":
+        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9)
 
-    optimizer = Adam(imdb_model.parameters())
-
-    scheduler = MultiStepLR(optimizer, milestones=[10], gamma=0.1)
-
-    criteon = nn.CrossEntropyLoss().to(DEVICE)
+    criteon = nn.CrossEntropyLoss()
 
     train_loss_list = []
     val_loss_list = []
     train_acc_list = []
     val_acc_list = []
 
-    # log process
-    best_acc = 0
-    for epoch in range(args.epochs):
-        train_loss = []
+    for i in range(epoch):
+        bar = tqdm(train_loader, total=len(train_loader))
         model.train()
-        correct = 0
-        for tokens, token_len, labels in train_data_loader:
-            tokens, token_len, labels = tokens.to(DEVICE), token_len.to(DEVICE), labels.to(DEVICE)
-            optimizer.zero_grad()
-            preds = model(tokens)
+        train_loss, label_list, pred_list = [], [], []
+        for idx, (tokens, labels) in enumerate(bar):
+            tokens = torch.stack(tokens, dim=1).to(device())
+            target = labels.to(device())
 
-            loss = criteon(preds, labels)
+            optimizer.zero_grad()
+
+            preds = model(tokens)
+            loss = criteon(preds, target)
+
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
             optimizer.step()
 
             train_loss.append(loss.item())
-            correct += (preds.argmax(1) == labels).sum()
-            torch.cuda.empty_cache()
+            label_list.append(labels.detach().cpu().numpy())
+            pred_list.append(preds.detach().cpu().numpy())
 
-        # learning rate decay
-        scheduler.step()
+            bar.set_description("epcoh:{}  idx:{}   loss:{:.6f}".format(i, idx, loss.item()))
 
         train_loss = np.array(train_loss).mean()
-        train_acc = float(correct) / len(train_data_loader.dataset)
-        val_loss, val_acc = evaluate(model, dev_data_loader, criteon)
+        val_loss, val_acc = validate(model, val_loader, criteon)
 
-        # if val_acc> 0.9:
-            # best_acc = val_acc
-        torch.save(model.state_dict(), SAVE_PATH+"epoch{}_{:.4f}.pt".format(epoch, val_acc))
-        print('epochs:{},Training loss:{:4f}, Val loss:{:4f}'.format(epoch, train_loss,val_loss ))
-        print('Training acc:{:4f}, Val acc:{:4f}'.format( train_acc,val_acc ))
-        print()
+        pred_list = np.argmax(np.concatenate(pred_list, axis=0), axis=1)
+        label_list = np.concatenate(label_list, axis=0)
 
+        correct = (pred_list == label_list).sum()
+        train_acc = float(correct) / len(label_list)
+
+        torch.save(model.state_dict(), SAVE_PATH + "cnn_model_epoch{}_{:.4f}.pt".format(i, val_acc))
+        print('Training loss:{}, Val loss:{}'.format(train_loss, val_loss))
+        print("train acc:{:.4f}, val acc:{:4f}".format(train_acc, val_acc))
 
         train_loss_list.append(train_loss)
         train_acc_list.append(train_acc)
@@ -166,50 +208,35 @@ def train(args):
     plt.show()
 
 
-def predict(args, weights_path):
+def predict(sentence,max_len, weights_path):
 
-    data_set = WaiMaiDataSet(TEST_PATH, wv_embedding.word_to_id, args.max_len, args.use_unk)
-    test_loader = DataLoader(data_set, batch_size=args.batch_size, shuffle=False)
+    # weibo_loader = BertLoader(batch_size, ROOT_PATH, max_len)
+    # test_loader = weibo_loader.get_test_loader()
 
-    model = TextCNN(args.vocab_size, args.embedding_dim, wv_embedding.embedding)
-
-    criterion = nn.CrossEntropyLoss()
-    model.load_state_dict(torch.load(weights_path))
+    # construct data loader
+    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
     model = model.to(DEVICE)
-    loss, acc = evaluate(model, test_loader, criterion)
-    print("test loss:{:4f}, acc:{:4f}".format(loss, acc))
+    # criterion = nn.CrossEntropyLoss()
+
+    text_tokens = [word for word in jieba.cut(sentence)]  # 直接使用jieba分词
+    tokens = voc_model.transform(text_tokens, max_len=max_len)
+    tokens = torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(DEVICE)
+
+    preds = model(tokens)
+
+    # entroy = nn.CrossEntropyLoss()
+    # target1 = torch.tensor([0])
+    # target2 = torch.tensor([1])
+    #
+    # print(entroy(preds, target1),entroy(preds, target2))
+    print("output",preds)
 
 
 if __name__ == "__main__":
-    imdb_dataset = get_dataset()
-    imdb_model = TextCNN(vocab_size, embedding_dim, wv_embedding.embedding)
-
-
-    import argparse
-
-    parser = argparse.ArgumentParser()
-
-    # parameters about train model
-    parser.add_argument('--lr', type=float, default=5e-3)
-    parser.add_argument('--weight_decay', type=float, default=1e-5)
-    parser.add_argument('--epochs', type=int, default=15)
-    parser.add_argument('--max_len', type=int, default=200)
-    parser.add_argument('--batch_size', type=int, default=64)
-
-    parser.add_argument('--embedding_dim', type=int, default=300)
-    parser.add_argument('--vocab_size', type=int, default=29000)
-    parser.add_argument('--use_unk', default=False, action='store_true')
-    args = parser.parse_args()
-    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    TRAIN_PATH = 'data/waimai10k/waimai10k_train.csv'
-    DEV_PATH = 'data/waimai10k/waimai10k_val.csv'
-    TEST_PATH = 'data/waimai10k/waimai10k_test.csv'
     SAVE_PATH = 'weights/'
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    train(optimizer="sgd", lr=5e-4, weight_decay=1e-3, epoch=10, clip=0.8)
+    # predict('好看的，赞，推荐给大家', max_len=100, weights_path="weights/cnn_model_epoch2_0.6360.pt")
+    # predict('无理由特效,全程很尴尬，这一星是给幕后辛苦的特效人员的', max_len=100, weights_path="weights/cnn_model_epoch2_0.6360.pt")
 
-    wv_path = "D:/datasets/NLP/embedding_cn/sgns.weibo.bigram-char.bz2"
-    data_path = "D:/datasets/NLP/waimai10k.csv"
-    emb_path = 'data/waimai10k/waimai10k_vocab29k_embedding.npy'
-    # wv_embedding = WVEmbedding(wv_path, data_path, 29000, emb_path=emb_path)
-
-    predict(args, "weights/epoch10_0.948.pt")
-    train(args)

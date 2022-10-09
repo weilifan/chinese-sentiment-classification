@@ -40,7 +40,7 @@ class ImdbDataset(Dataset):
         # label = 0 if label < 5 else 1
 
         label = self.total_star[idx]
-        label = 0 if label < 3 else 1
+        label = 0 if label <= 3 else 1
 
         return voc_result, label
 

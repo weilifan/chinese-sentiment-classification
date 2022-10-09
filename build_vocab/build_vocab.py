@@ -25,14 +25,14 @@ if __name__ == '__main__':
             ws.fit(sentence)
 
     ws.build_vocab()
-    print(len(ws))
-    print(ws.dict)
-
-    ret = ws.transform(["美队", "好帅", "自动", "捂", "眼睛"], max_len=13)
-    print(ret)
-
-    ret = ws.inverse_transform(ret)
-    print(ret)
+    # print(len(ws))
+    # print(ws.dict)
+    #
+    # ret = ws.transform(["美队", "好帅", "自动", "捂", "眼睛"], max_len=13)
+    # print(ret)
+    #
+    # ret = ws.inverse_transform(ret)
+    # print(ret)
 
 
     if not os.path.exists("../models"):
