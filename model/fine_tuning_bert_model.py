@@ -1,17 +1,21 @@
-import torch
-from torch.utils.data import Dataset, DataLoader, SubsetRandomSampler
-from tqdm import tqdm
-from transformers import BertTokenizer, BertModel
-import torch.nn as nn
 import numpy as np
 import pandas as pd
-from torch import optim
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from matplotlib import pyplot as plt
+from torch import optim
+from torch.utils.data import Dataset, SubsetRandomSampler
+from tqdm import tqdm
+from transformers import BertTokenizer, BertModel
+
+SAVE_PATH = 'weights/'
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class BertDataset(Dataset):
 
-    def __init__(self, data_path, max_len=200):
+    def __init__(self, data_path, max_len=100):
         super(BertDataset, self).__init__()
 
         self.tokenizer = BertTokenizer.from_pretrained("bert-base-chinese")
@@ -86,9 +90,9 @@ class BertLoader():
     #     return self._test_loader
 
 
-class BertModel(nn.Module):
+class ImdbModel(nn.Module):
     def __init__(self):
-        super(BertModel, self).__init__()
+        super(ImdbModel, self).__init__()
 
         self.bert = BertModel.from_pretrained("bert-base-chinese")
         self.dropout = nn.Dropout(0.3)
@@ -129,13 +133,13 @@ def validate(model, data_loader, criteon):
     return np.array(dev_loss).mean(), float(correct) / len(label_list)
 
 
-def train(batch_size, optimizer, lr, weight_decay, epochs, clip, max_len):
+def train(batch_size, optimizer, lr, weight_decay, epochs, clip):
     dataloader = BertLoader(batch_size)
     train_loader = dataloader.get_train_loader()
     val_loader = dataloader.get_val_loader()
 
     # construct data loader
-    model = BertModel()
+    model = ImdbModel()
     model = model.to(DEVICE)
     if optimizer == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -150,7 +154,6 @@ def train(batch_size, optimizer, lr, weight_decay, epochs, clip, max_len):
     val_acc_list = []
 
     # log process
-    best_acc = 0
     for epoch in range(epochs):
         bar = tqdm(train_loader, total=len(train_loader))
         model.train()
@@ -221,7 +224,7 @@ def predict(sentence, max_len, weights_path):
     # test_loader = weibo_loader.get_test_loader()
 
     # construct data loader
-    model = BertModel()
+    model = ImdbModel()
     model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
     model = model.to(DEVICE)
     # criterion = nn.CrossEntropyLoss()
@@ -249,21 +252,21 @@ def predict(sentence, max_len, weights_path):
 
     # model.eval()
     # with torch.no_grad():
-    preds = model(input_ids=tokens, atten_mask=masks)
+    preds = F.softmax(model(input_ids=tokens, atten_mask=masks), dim=-1)
 
-    entroy = nn.CrossEntropyLoss()
-    target1 = torch.tensor([0])
-    target2 = torch.tensor([1])
-
-    print(entroy(preds, target1), entroy(preds, target2))
-    # print("output",preds)
+    # entroy = nn.CrossEntropyLoss()
+    # target1 = torch.tensor([0])
+    # target2 = torch.tensor([1])
+    #
+    # print(entroy(preds, target1), entroy(preds, target2))
+    return preds
 
 
 if __name__ == "__main__":
-    SAVE_PATH = 'weights/'
-
-    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # SAVE_PATH = 'weights/'
+    #
+    # DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # th number 3 has the highest priority
-    train(lr=5e-4, weight_decay=1e-3, clip=0.8, epochs=1, optimizer="sgd", batch_size=10, max_len=200)
-    predict('好看的，赞，推荐给大家', max_len=200, weights_path="weights/epoch0_0.8407.pt")
-    predict('什么破烂反派，毫无戏剧冲突能消耗两个多小时生命，还强加爱情戏。脑残片好圈钱倒是真的', max_len=200, weights_path="weights/epoch0_0.8407.pt")
+    train(lr=5e-4, weight_decay=1e-3, clip=0.8, epochs=100, optimizer="sgd", batch_size=512)
+    # predict('好看的，赞，推荐给大家', max_len=200, weights_path="weights/epoch0_0.8407.pt")
+    # predict('什么破烂反派，毫无戏剧冲突能消耗两个多小时生命，还强加爱情戏。脑残片好圈钱倒是真的', max_len=200, weights_path="weights/epoch0_0.8407.pt")

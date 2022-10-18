@@ -15,9 +15,12 @@ from vocab import Vocab
 import pickle
 
 batch_size = 512
-voc_model = pickle.load(open("../build_vocab/models/vocab.pkl", "rb"))
+voc_model = pickle.load(open("../models/vocab.pkl", "rb"))
 sequence_max_len = 100
 Vocab()
+
+SAVE_PATH = 'weights/'
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def collate_fn(batch):
@@ -70,20 +73,26 @@ class ImdbModel(nn.Module):
         :param input:[batch_size,max_len]
         :return:
         """
-        input_embeded = self.embedding(input)  # input embeded :[batch_size,max_len,200]
+        input_embeded = self.embedding(input)  # torch.Size([512, 100, 200])
 
-        output, h_n = self.rnn(input_embeded)  # h_n :[4,batch_size,hidden_size]
+        output, h_n = self.rnn(input_embeded)  # output torch.Size([512, 100, 128]), h_n torch.Size([6, 512, 64])
+        print("output", output.size())
+        print("h_n", h_n.size())
+        print("h_n[-1, :, :]", h_n[-1, :, :].size())
+        print("h_n[-2, :, :]", h_n[-2, :, :].size())
         # out :[batch_size,hidden_size*2]
         out = torch.cat([h_n[-1, :, :], h_n[-2, :, :]], dim=-1)  # 拼接正向最后一个输出和反向最后一个输出
-
+                                                                # h_n[-1, :, :] torch.Size([512, 64])
+                                                                # h_n[-2, :, :] torch.Size([512, 64])
+                                                                # out torch.Size([512, 128])
         # 进行全连接
-        out_fc1 = self.fc1(out)
+        out_fc1 = self.fc1(out)  # out_fc1 torch.Size([512, 64])
         # 进行relu
         out_fc1_relu = F.relu(out_fc1)
 
         # 全连接
-        out_fc2 = self.fc2(out_fc1_relu)  # out :[batch_size,2]
-        return F.log_softmax(out_fc2, dim=-1)
+        out_fc2 = self.fc2(out_fc1_relu)  # out_fc2 torch.Size([512, 2])
+        return out_fc2
 
 
 def device():
@@ -122,7 +131,7 @@ def train(optimizer, lr, weight_decay, epoch, clip):
     val_loader = get_dataloader(dataset, train=False)
 
     model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
-    # model.load_state_dict(torch.load("weights/fc_model_epoch9_0.8343.pt", map_location=DEVICE))
+    # model.load_state_dict(torch.load("weights/rnn_model_epoch41_0.7151.pt", map_location=DEVICE))
     if optimizer == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     else:
@@ -167,7 +176,7 @@ def train(optimizer, lr, weight_decay, epoch, clip):
         correct = (pred_list == label_list).sum()
         train_acc = float(correct) / len(label_list)
 
-        torch.save(model.state_dict(), SAVE_PATH + "rnn_model_epoch{}_{:.4f}.pt".format(i, val_acc))
+        torch.save(model.state_dict(), SAVE_PATH + "rnn_model_epoch{}_{:.4f}.pt".format(i+42, val_acc))
         print('Training loss:{}, Val loss:{}'.format(train_loss, val_loss))
         print("train acc:{:.4f}, val acc:{:4f}".format(train_acc, val_acc))
 
@@ -208,22 +217,17 @@ def predict(sentence,max_len, weights_path):
     tokens = voc_model.transform(text_tokens, max_len=max_len)
     tokens = torch.tensor(tokens, dtype=torch.long).unsqueeze(0).to(DEVICE)
 
-    preds = model(tokens)
+    preds = F.softmax(model(tokens), dim=-1)
 
-    entroy = nn.CrossEntropyLoss()
-    target1 = torch.tensor([0])
-    target2 = torch.tensor([1])
-
-    print(entroy(preds, target1),entroy(preds, target2))
-    # print("output",preds)
+    return preds
 
 
 if __name__ == '__main__':
-    SAVE_PATH = 'weights/'
-    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    train(optimizer="sgd", lr=5e-4, weight_decay=1e-3, epoch=10, clip=0.8)
-    # predict('好看的，赞，推荐给大家', max_len=100, weights_path="weights/fc_model_epoch1_0.8319.pt")
-    # predict('什么破烂反派，毫无戏剧冲突能消耗两个多小时生命，还强加爱情戏。脑残片好圈钱倒是真的', max_len=100, weights_path="weights/fc_model_epoch1_0.8319.pt")
+    # SAVE_PATH = 'weights/'
+    # DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    train(optimizer="sgd", lr=5e-4, weight_decay=1e-3, epoch=8, clip=0.8)
+    # predict('好看的，赞，推荐给大家', max_len=100, weights_path="weights/rnn_model_epoch3_0.6007.pt")
+    # predict('什么破烂反派，毫无戏剧冲突能消耗两个多小时生命，还强加爱情戏。脑残片好圈钱倒是真的', max_len=100, weights_path="weights/rnn_model_epoch3_0.6007.pt")
 
     # imdb_dataset = get_dataset()
     # imdb_model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
