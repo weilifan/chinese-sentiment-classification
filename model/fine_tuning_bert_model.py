@@ -2,15 +2,11 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from matplotlib import pyplot as plt
 from torch import optim
 from torch.utils.data import Dataset, SubsetRandomSampler
 from tqdm import tqdm
 from transformers import BertTokenizer, BertModel
-
-SAVE_PATH = 'weights/'
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class BertDataset(Dataset):
@@ -61,7 +57,7 @@ class BertDataset(Dataset):
 class BertLoader():
 
     def __init__(self, batch_size):
-        train_dataset = BertDataset("../data/DMSC.csv")
+        train_dataset = BertDataset("DMSC.csv")
 
         validation_split = .2
         dataset_size = len(train_dataset)
@@ -252,21 +248,21 @@ def predict(sentence, max_len, weights_path):
 
     # model.eval()
     # with torch.no_grad():
-    preds = F.softmax(model(input_ids=tokens, atten_mask=masks), dim=-1)
+    preds = model(input_ids=tokens, atten_mask=masks)
 
-    # entroy = nn.CrossEntropyLoss()
-    # target1 = torch.tensor([0])
-    # target2 = torch.tensor([1])
-    #
-    # print(entroy(preds, target1), entroy(preds, target2))
-    return preds
+    entroy = nn.CrossEntropyLoss()
+    target1 = torch.tensor([0])
+    target2 = torch.tensor([1])
+
+    print(entroy(preds, target1), entroy(preds, target2))
+    # print("output",preds)
 
 
 if __name__ == "__main__":
-    # SAVE_PATH = 'weights/'
-    #
-    # DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    SAVE_PATH = ''
+
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # th number 3 has the highest priority
-    train(lr=5e-4, weight_decay=1e-3, clip=0.8, epochs=100, optimizer="sgd", batch_size=512)
+    train(lr=5e-4, weight_decay=1e-3, clip=0.8, epochs=100, optimizer="sgd", batch_size=50)
     # predict('好看的，赞，推荐给大家', max_len=200, weights_path="weights/epoch0_0.8407.pt")
     # predict('什么破烂反派，毫无戏剧冲突能消耗两个多小时生命，还强加爱情戏。脑残片好圈钱倒是真的', max_len=200, weights_path="weights/epoch0_0.8407.pt")
