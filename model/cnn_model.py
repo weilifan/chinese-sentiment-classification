@@ -38,7 +38,7 @@ def collate_fn(batch):
 
 
 def get_dataset():
-    return dataset_train.ImdbDataset(train)
+    return dataset_train.DMSCDataset(train)
 
 
 def get_dataloader(imdb_dataset, train):
@@ -68,7 +68,7 @@ class DMSCDModel(nn.Module):
         self.embedding = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=200, padding_idx=padding_idx)
 
         self.conv1 = nn.Sequential(
-            nn.Conv2d(1, 100, kernel_size=(3, embedding_dim)),#二维卷积层。它有高和宽两个空间维度
+            nn.Conv2d(1, 100, kernel_size=(3, embedding_dim)),  # 二维卷积层。它有高和宽两个空间维度
             nn.ReLU(inplace=True)
 
         )
@@ -118,7 +118,6 @@ def validate(model, data_loader, criteon):
     dev_loss, label_list, pred_list = [], [], []
 
     for tokens, labels in data_loader:
-
         tokens = torch.stack(tokens, dim=1).to(device())
         labels = labels.to(device())
         with torch.no_grad():
@@ -186,7 +185,7 @@ def train(optimizer, lr, weight_decay, epoch, clip):
         correct = (pred_list == label_list).sum()
         train_acc = float(correct) / len(label_list)
 
-        torch.save(model.state_dict(), SAVE_PATH + "cnn_model_epoch{}_{:.4f}.pt".format(i+34, val_acc))
+        torch.save(model.state_dict(), SAVE_PATH + "cnn_model_epoch{}_{:.4f}.pt".format(i + 34, val_acc))
         print('Training loss:{}, Val loss:{}'.format(train_loss, val_loss))
         print("train acc:{:.4f}, val acc:{:4f}".format(train_acc, val_acc))
 
@@ -212,8 +211,7 @@ def train(optimizer, lr, weight_decay, epoch, clip):
     plt.show()
 
 
-def predict(sentence,max_len, weights_path):
-
+def predict(sentence, max_len, weights_path):
     # weibo_loader = BertLoader(batch_size, ROOT_PATH, max_len)
     # test_loader = weibo_loader.get_test_loader()
 
@@ -240,7 +238,6 @@ def predict(sentence,max_len, weights_path):
 if __name__ == "__main__":
     # SAVE_PATH = 'weights/'
     # DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    train(optimizer="sgd", lr=5e-4, weight_decay=1e-3, epoch=16 , clip=0.8)
+    train(optimizer="sgd", lr=5e-4, weight_decay=1e-3, epoch=16, clip=0.8)
     # predict('好看的，赞，推荐给大家', max_len=100, weights_path="weights/cnn_model_epoch2_0.6360.pt")
     # predict('无理由特效,全程很尴尬，这一星是给幕后辛苦的特效人员的', max_len=100, weights_path="weights/cnn_model_epoch2_0.6360.pt")
-

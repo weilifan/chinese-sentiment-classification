@@ -13,7 +13,7 @@ from model.vocab import Vocab
 Vocab()
 
 
-class ImdbDataset(Dataset):
+class DMSCDataset(Dataset):
     def __init__(self, train=True, sequence_max_len=100):
         # super(ImdbDataset,self).__init__()
 
@@ -122,8 +122,8 @@ def collate_fn(batch):
 
 if __name__ == "__main__":
 
-    imdb_dataset = ImdbDataset(True)
-    my_dataloader = DataLoader(imdb_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
+    dmsc_dataset = DMSCDataset(True)
+    my_dataloader = DataLoader(dmsc_dataset, batch_size=2, shuffle=True, collate_fn=collate_fn)
     for data in my_dataloader:
         print(data)
         # vocab_model = pickle.load(open("./models/vocab.pkl", "rb"))

@@ -38,7 +38,7 @@ def collate_fn(batch):
 
 
 def get_dataset():
-    return dataset_train.ImdbDataset(train)
+    return dataset_train.DMSCDataset(train)
 
 
 def get_dataloader(imdb_dataset, train):
