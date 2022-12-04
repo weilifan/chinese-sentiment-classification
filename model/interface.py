@@ -12,10 +12,10 @@ def start_analysis():
     fine_tuning_bert_result.delete('1.0', 'end')
 
     text = text_input.get("1.0", "end")
-    fc_outcome = fc_model.predict(text, max_len=100, weights_path="weights/fc_model_epoch75_0.6821.pt")
-    rnn_outcome = rnn_model.predict(text, max_len=100, weights_path="weights/rnn_model_epoch49_0.7221.pt")
-    cnn_outcome = cnn_model.predict(text, max_len=100, weights_path="weights/cnn_model_epoch49_0.7545.pt")
-    bert_outcome = fine_tuning_bert_model.predict(text, max_len=100, weights_path="weights/epoch0_0.8407.pt")
+    fc_outcome = fc_model.predict(text, max_len=100, weights_path="weights/fc_weight/fc_model_epoch75_0.6821.pt") # max_len是最大token数
+    rnn_outcome = rnn_model.predict(text, max_len=100, weights_path="weights/rnn_weight/rnn_model_epoch49_0.7221.pt")
+    cnn_outcome = cnn_model.predict(text, max_len=100, weights_path="weights/cnn_weight/cnn_model_epoch49_0.7545.pt")
+    bert_outcome = fine_tuning_bert_model.predict(text, max_len=100, weights_path="weights/bert/epoch39_0.7325.pt")
 
     fc_result.insert("insert", fc_outcome)
     rnn_result.insert("insert", rnn_outcome)

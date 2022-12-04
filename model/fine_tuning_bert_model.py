@@ -2,11 +2,15 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from matplotlib import pyplot as plt
 from torch import optim
 from torch.utils.data import Dataset, SubsetRandomSampler
 from tqdm import tqdm
 from transformers import BertTokenizer, BertModel
+
+SAVE_PATH = 'weights/'
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 class BertDataset(Dataset):
@@ -57,25 +61,26 @@ class BertDataset(Dataset):
 class BertLoader():
 
     def __init__(self, batch_size):
-        train_dataset = BertDataset("DMSC.csv")
+        train_dataset = BertDataset("../data/DMSC.csv")
 
         validation_split = .2
         dataset_size = len(train_dataset)
         indices = list(range(dataset_size))
         split = int(np.floor(validation_split * dataset_size))
+
+        # 对数据进行shuffle
+        np.random.seed(42)
+        np.random.shuffle(indices)
+
         train_indices, val_indices = indices[split:], indices[:split]
 
-        # Creating PT data samplers and loaders:
         train_sampler = SubsetRandomSampler(train_indices)
         valid_sampler = SubsetRandomSampler(val_indices)
 
-        # val_dataset = BertDataset(root_path+"_val.csv", max_len)
-        # test_dataset = BertDataset(root_path+"_test.csv", max_len)
         self._train_loader = torch.utils.data.DataLoader(train_dataset, shuffle=False, batch_size=batch_size,
                                                          sampler=train_sampler)
         self._val_loader = torch.utils.data.DataLoader(train_dataset, shuffle=False, batch_size=batch_size,
                                                        sampler=valid_sampler)
-        # self._test_loader = torch.utils.data.DataLoader(test_dataset, shuffle=False, batch_size=batch_size)
 
     def get_train_loader(self):
         return self._train_loader
@@ -86,15 +91,17 @@ class BertLoader():
     #     return self._test_loader
 
 
-class ImdbModel(nn.Module):
+class DMSCDModel(nn.Module):
     def __init__(self):
-        super(ImdbModel, self).__init__()
+        super(DMSCDModel, self).__init__()
 
         self.bert = BertModel.from_pretrained("bert-base-chinese")
         self.dropout = nn.Dropout(0.3)
         self.classifier = nn.Linear(768, 2)
 
     def forward(self, input_ids, atten_mask):
+        print("input_ids形状", input_ids.size());
+        print("atten_mask形状", atten_mask.size());
         bert_output = self.bert(input_ids, attention_mask=atten_mask)  # cont_reps是last_hidden_state
         features = bert_output[1]  # 这是序列的第一个token(classification token)的最后一层的隐藏状态，它是由线性层和Tanh激活函数进一步处理的。
         cls_rep = self.dropout(features)
@@ -135,7 +142,7 @@ def train(batch_size, optimizer, lr, weight_decay, epochs, clip):
     val_loader = dataloader.get_val_loader()
 
     # construct data loader
-    model = ImdbModel()
+    model = DMSCDModel()
     model = model.to(DEVICE)
     if optimizer == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -220,7 +227,7 @@ def predict(sentence, max_len, weights_path):
     # test_loader = weibo_loader.get_test_loader()
 
     # construct data loader
-    model = ImdbModel()
+    model = DMSCDModel()
     model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
     model = model.to(DEVICE)
     # criterion = nn.CrossEntropyLoss()
@@ -248,21 +255,21 @@ def predict(sentence, max_len, weights_path):
 
     # model.eval()
     # with torch.no_grad():
-    preds = model(input_ids=tokens, atten_mask=masks)
+    preds = F.softmax(model(input_ids=tokens, atten_mask=masks), dim=-1)
 
-    entroy = nn.CrossEntropyLoss()
-    target1 = torch.tensor([0])
-    target2 = torch.tensor([1])
-
-    print(entroy(preds, target1), entroy(preds, target2))
-    # print("output",preds)
+    # entroy = nn.CrossEntropyLoss()
+    # target1 = torch.tensor([0])
+    # target2 = torch.tensor([1])
+    #
+    # print(entroy(preds, target1), entroy(preds, target2))
+    return preds
 
 
 if __name__ == "__main__":
-    SAVE_PATH = ''
-
-    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # SAVE_PATH = 'weights/'
+    #
+    # DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     # th number 3 has the highest priority
-    train(lr=5e-4, weight_decay=1e-3, clip=0.8, epochs=100, optimizer="sgd", batch_size=50)
+    train(lr=5e-4, weight_decay=1e-3, clip=0.8, epochs=50, optimizer="sgd", batch_size=128)
     # predict('好看的，赞，推荐给大家', max_len=200, weights_path="weights/epoch0_0.8407.pt")
     # predict('什么破烂反派，毫无戏剧冲突能消耗两个多小时生命，还强加爱情戏。脑残片好圈钱倒是真的', max_len=200, weights_path="weights/epoch0_0.8407.pt")

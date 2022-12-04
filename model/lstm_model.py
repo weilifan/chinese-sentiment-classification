@@ -41,9 +41,9 @@ def get_dataloader(imdb_dataset, train=True):
     return DataLoader(imdb_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
 
 
-class ImdbModel(nn.Module):
+class DMSCDModel(nn.Module):
     def __init__(self, num_embeddings, padding_idx):
-        super(ImdbModel, self).__init__()
+        super(DMSCDModel, self).__init__()
         self.embedding = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=200, padding_idx=padding_idx).to()
         self.lstm = nn.LSTM(input_size=200, hidden_size=64, num_layers=2, batch_first=True, bidirectional=True,
                             dropout=0.5) # batch_first： 如果是True，则input为(batch, seq, input_size)。默认值为：False（seq_len, batch, input_size）
@@ -138,7 +138,7 @@ def test(imdb_model, imdb_dataset):
 
 if __name__ == '__main__':
     imdb_dataset = get_dataset()
-    imdb_model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    imdb_model = DMSCDModel(len(voc_model), voc_model.PAD).to(device())
     train(imdb_model, imdb_dataset, 4)
     test(imdb_model, imdb_dataset)
 

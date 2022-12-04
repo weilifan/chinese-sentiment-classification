@@ -60,9 +60,9 @@ def get_dataloader(imdb_dataset, train):
     return loader
 
 
-class ImdbModel(nn.Module):
+class DMSCDModel(nn.Module):
     def __init__(self, num_embeddings, padding_idx):
-        super(ImdbModel, self).__init__()
+        super(DMSCDModel, self).__init__()
         self.embedding = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=200, padding_idx=padding_idx)
 
         self.fc = nn.Linear(sequence_max_len * 200, 2)
@@ -116,7 +116,7 @@ def train(optimizer, lr, weight_decay, epoch, clip):
     train_loader = get_dataloader(dataset, train=True)
     val_loader = get_dataloader(dataset, train=False)
 
-    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    model = DMSCDModel(len(voc_model), voc_model.PAD).to(device())
     model.load_state_dict(torch.load("weights/fc_model_epoch49_0.6578.pt", map_location=DEVICE))
     if optimizer == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -189,15 +189,9 @@ def train(optimizer, lr, weight_decay, epoch, clip):
 
 
 def predict(sentence,max_len, weights_path):
-
-    # weibo_loader = BertLoader(batch_size, ROOT_PATH, max_len)
-    # test_loader = weibo_loader.get_test_loader()
-
-    # construct data loader
-    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    model = DMSCDModel(len(voc_model), voc_model.PAD).to(device())
     model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
     model = model.to(DEVICE)
-    # criterion = nn.CrossEntropyLoss()
 
     text_tokens = [word for word in jieba.cut(sentence)]  # 直接使用jieba分词
     tokens = voc_model.transform(text_tokens, max_len=max_len)
@@ -205,11 +199,6 @@ def predict(sentence,max_len, weights_path):
 
     preds = F.softmax(model(tokens), dim=-1)
 
-    # entroy = nn.CrossEntropyLoss()
-    # target1 = torch.tensor([0])
-    # target2 = torch.tensor([1])
-    #
-    # print(entroy(preds, target1),entroy(preds, target2))
     return preds
 
 

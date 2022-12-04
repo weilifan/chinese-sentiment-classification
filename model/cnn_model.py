@@ -59,9 +59,10 @@ def get_dataloader(imdb_dataset, train):
     loader = _train_loader if train else _val_loader
     return loader
 
-class ImdbModel(nn.Module):
+
+class DMSCDModel(nn.Module):
     def __init__(self, num_embeddings, padding_idx):
-        super(ImdbModel, self).__init__()
+        super(DMSCDModel, self).__init__()
         embedding_dim = 200
 
         self.embedding = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=200, padding_idx=padding_idx)
@@ -139,7 +140,7 @@ def train(optimizer, lr, weight_decay, epoch, clip):
     train_loader = get_dataloader(dataset, train=True)
     val_loader = get_dataloader(dataset, train=False)
 
-    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    model = DMSCDModel(len(voc_model), voc_model.PAD).to(device())
     model.load_state_dict(torch.load("weights/cnn_model_epoch33_0.7467.pt", map_location=DEVICE))
     if optimizer == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -217,7 +218,7 @@ def predict(sentence,max_len, weights_path):
     # test_loader = weibo_loader.get_test_loader()
 
     # construct data loader
-    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    model = DMSCDModel(len(voc_model), voc_model.PAD).to(device())
     model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
     model = model.to(DEVICE)
     # criterion = nn.CrossEntropyLoss()

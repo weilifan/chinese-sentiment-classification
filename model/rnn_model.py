@@ -59,12 +59,12 @@ def get_dataloader(imdb_dataset, train):
     return loader
 
 
-class ImdbModel(nn.Module):
+class DMSCDModel(nn.Module):
     def __init__(self, num_embeddings, padding_idx):
-        super(ImdbModel, self).__init__()
+        super(DMSCDModel, self).__init__()
         self.embedding = nn.Embedding(num_embeddings=num_embeddings, embedding_dim=200, padding_idx=padding_idx).to()
-        self.rnn = nn.RNN(input_size=200, hidden_size=64, num_layers=2, nonlinearity='tanh', bias=True, batch_first=True, bidirectional=True,
-                            dropout=0.5)
+        self.rnn = nn.RNN(input_size=200, hidden_size=64, num_layers=2, nonlinearity='tanh', bias=True,
+                          batch_first=True, bidirectional=True, dropout=0.5)
         self.fc1 = nn.Linear(64 * 2, 64)
         self.fc2 = nn.Linear(64, 2)
 
@@ -75,11 +75,7 @@ class ImdbModel(nn.Module):
         """
         input_embeded = self.embedding(input)  # torch.Size([512, 100, 200])
 
-        output, h_n = self.rnn(input_embeded)  # output torch.Size([512, 100, 128]), h_n torch.Size([6, 512, 64])
-        print("output", output.size())
-        print("h_n", h_n.size())
-        print("h_n[-1, :, :]", h_n[-1, :, :].size())
-        print("h_n[-2, :, :]", h_n[-2, :, :].size())
+        output, h_n = self.rnn(input_embeded)  # output torch.Size([512, 100, 128]), h_n torch.Size([4, 512, 64])
         # out :[batch_size,hidden_size*2]
         out = torch.cat([h_n[-1, :, :], h_n[-2, :, :]], dim=-1)  # 拼接正向最后一个输出和反向最后一个输出
                                                                 # h_n[-1, :, :] torch.Size([512, 64])
@@ -130,7 +126,7 @@ def train(optimizer, lr, weight_decay, epoch, clip):
     train_loader = get_dataloader(dataset, train=True)
     val_loader = get_dataloader(dataset, train=False)
 
-    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    model = DMSCDModel(len(voc_model), voc_model.PAD).to(device())
     # model.load_state_dict(torch.load("weights/rnn_model_epoch41_0.7151.pt", map_location=DEVICE))
     if optimizer == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -208,7 +204,7 @@ def predict(sentence,max_len, weights_path):
     # test_loader = weibo_loader.get_test_loader()
 
     # construct data loader
-    model = ImdbModel(len(voc_model), voc_model.PAD).to(device())
+    model = DMSCDModel(len(voc_model), voc_model.PAD).to(device())
     model.load_state_dict(torch.load(weights_path, map_location=DEVICE))
     model = model.to(DEVICE)
     # criterion = nn.CrossEntropyLoss()
