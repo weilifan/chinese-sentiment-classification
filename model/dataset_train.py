@@ -28,17 +28,10 @@ class DMSCDataset(Dataset):
         self.total_star = star_array.tolist()  # 将一维矩阵转化为列表
 
     def __getitem__(self, idx):
-        # file = self.total_path[idx]
-        # 从txt获取评论并分词
-        # review = tokenlize(open(file, "r", encoding="utf-8").read())
-
-        review = tokenlize(self.total_review[idx]) #直接使用jieba分词
-
+        review = tokenlize(self.total_review[idx])  # 使用jieba进行分词
+        # 获取每个分词对应的index
         voc_result = self.voc_model.transform(review, max_len=self.sequence_max_len)
         # 获取评论对应的label
-        # label = int(file.split("_")[-1].split(".")[0])
-        # label = 0 if label < 5 else 1
-
         label = self.total_star[idx]
         label = 0 if label <= 3 else 1
 
@@ -73,7 +66,6 @@ def tokenlize(sentence):
     # result = [i for i in sentence.split(" ") if len(i) > 0]
 
     result = [word for word in jieba.cut(sentence) if len(word) > 0]  # 直接使用jieba分词
-
 
     return result
 

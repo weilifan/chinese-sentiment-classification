@@ -40,9 +40,9 @@ def get_dataset():
     return dataset_train.DMSCDataset(train)
 
 
-def get_dataloader(imdb_dataset, train):
+def get_dataloader(dmsc_dataset, train):
     validation_split = .2
-    dataset_size = len(imdb_dataset)
+    dataset_size = len(dmsc_dataset)
     indices = list(range(dataset_size))
     split = int(np.floor(validation_split * dataset_size))
     train_indices, val_indices = indices[split:], indices[:split]
@@ -51,9 +51,9 @@ def get_dataloader(imdb_dataset, train):
     train_sampler = SubsetRandomSampler(train_indices)
     valid_sampler = SubsetRandomSampler(val_indices)
 
-    _train_loader = DataLoader(imdb_dataset, shuffle=False, batch_size=batch_size,
+    _train_loader = DataLoader(dmsc_dataset, shuffle=False, batch_size=batch_size,
                                sampler=train_sampler)
-    _val_loader = DataLoader(imdb_dataset, shuffle=False, batch_size=batch_size,
+    _val_loader = DataLoader(dmsc_dataset, shuffle=False, batch_size=batch_size,
                              sampler=valid_sampler)
     loader = _train_loader if train else _val_loader
     return loader
@@ -118,7 +118,6 @@ def validate(model, data_loader, criteon):
 
     correct = (pred_list == label_list).sum()
     return np.array(dev_loss).mean(), float(correct) / len(label_list)
-
 
 
 def train(optimizer, lr, weight_decay, epoch, clip):
